@@ -19,25 +19,41 @@ online_adapter_path = os.environ.get("ADAPTER_MODEL_NAME", "")
 pic_size = 512
 new_words = 512
 
-@st.cache_resource
-def load_everything():
-    if os.path.exists(local_adapter_path):
-        adapter_path = local_adapter_path
-    elif online_adapter_path.strip() != "":
-        adapter_path = online_adapter_path
-    else:
-        adapter_path = local_adapter_path
+def clear_ram():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    try:
-        processor = AutoProcessor.from_pretrained(
-            adapter_path,
-            trust_remote_code=True
-        )
-    except:
-        processor = AutoProcessor.from_pretrained(
-            base_model_name,
-            trust_remote_code=True
-        )
+def make_small_image(img):
+    w, h = img.size
+
+    if max(w, h) <= pic_size:
+        return img
+
+    if w > h:
+        new_w = pic_size
+        new_h = int(h * pic_size / w)
+    else:
+        new_h = pic_size
+        new_w = int(w * pic_size / h)
+
+    return img.resize((new_w, new_h))
+
+def find_adapter_path():
+    if os.path.exists(local_adapter_path):
+        return local_adapter_path
+
+    if online_adapter_path.strip() != "":
+        return online_adapter_path
+
+    return None
+
+@st.cache_resource
+def load_everything(adapter_path):
+    processor = AutoProcessor.from_pretrained(
+        base_model_name,
+        trust_remote_code=True
+    )
 
     if torch.cuda.is_available():
         four_bit = BitsAndBytesConfig(
@@ -69,27 +85,7 @@ def load_everything():
 
     model.eval()
 
-    return processor, model, adapter_path
-
-def clear_ram():
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-def make_small_image(img):
-    w, h = img.size
-
-    if max(w, h) <= pic_size:
-        return img
-
-    if w > h:
-        new_w = pic_size
-        new_h = int(h * pic_size / w)
-    else:
-        new_h = pic_size
-        new_w = int(w * pic_size / h)
-
-    return img.resize((new_w, new_h))
+    return processor, model
 
 def make_chat():
     line = "Convert this document image into clean Markdown. Keep headings, tables, lists, equations and reading order."
@@ -119,7 +115,14 @@ def move_batch(batch, model):
     return moved
 
 def create_markdown(img):
-    processor, model, adapter_path = load_everything()
+    adapter_path = find_adapter_path()
+
+    if adapter_path is None:
+        raise ValueError(
+            "Adapter model not found. Add final_markdown_model folder or set ADAPTER_MODEL_NAME variable."
+        )
+
+    processor, model = load_everything(adapter_path)
 
     img = img.convert("RGB")
     img = make_small_image(img)
@@ -163,31 +166,36 @@ def create_markdown(img):
 st.title("Document Image to Markdown Generator")
 st.write("Fine-tuned Qwen2-VL with QLoRA adapter for document image to Markdown generation.")
 
-try:
-    processor, model, adapter_path = load_everything()
-    model_ready = True
-except Exception as e:
-    model_ready = False
-    st.error("Model loading failed.")
-    st.exception(e)
+adapter_path = find_adapter_path()
 
 with st.sidebar:
     st.header("Model Settings")
     st.write("Base model")
     st.code(base_model_name)
+
     st.write("Adapter")
-    if online_adapter_path.strip() != "":
-        st.code(online_adapter_path)
+    if adapter_path is None:
+        st.error("Adapter missing")
     else:
-        st.code(local_adapter_path)
+        st.code(adapter_path)
+
     st.write("Image size")
     st.code(str(pic_size))
+
     st.write("Max new tokens")
     st.code(str(new_words))
+
     if torch.cuda.is_available():
         st.success("GPU available")
     else:
-        st.warning("CPU mode. This can be very slow.")
+        st.warning("CPU mode. This can be slow or fail for Qwen2-VL.")
+
+if adapter_path is None:
+    st.error("Adapter model not found.")
+    st.write("Use one of these fixes:")
+    st.code("Option 1: Upload final_markdown_model folder in repo")
+    st.code("Option 2: Set ADAPTER_MODEL_NAME in Space variables")
+    st.stop()
 
 uploaded_file = st.file_uploader(
     "Upload a document image",
@@ -206,7 +214,7 @@ if uploaded_file is not None:
     with right:
         st.subheader("Generated Markdown")
 
-        if st.button("Generate Markdown", disabled=not model_ready):
+        if st.button("Generate Markdown"):
             with st.spinner("Generating markdown..."):
                 try:
                     result = create_markdown(image)
