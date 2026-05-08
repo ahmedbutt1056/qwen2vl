@@ -40,9 +40,9 @@ def make_small_image(img):
     return img.resize((new_w, new_h))
 
 def has_adapter_files(path):
-    config_file = os.path.join(path, "adapter_config.json")
-    safe_file = os.path.join(path, "adapter_model.safetensors")
-    bin_file = os.path.join(path, "adapter_model.bin")
+    config_file = "adapter_config.json"
+    safe_file = "adapter_model.safetensors"
+    bin_file = "adapter_model.bin"
 
     if os.path.exists(config_file) and os.path.exists(safe_file):
         return True
