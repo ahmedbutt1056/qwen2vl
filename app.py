@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 base_model_name = "Qwen/Qwen2-VL-2B-Instruct"
-local_adapter_path = "final_markdown_model"
+local_adapter_folder = "final_markdown_model"
 online_adapter_path = os.environ.get("ADAPTER_MODEL_NAME", "")
 
 pic_size = 512
@@ -39,21 +39,43 @@ def make_small_image(img):
 
     return img.resize((new_w, new_h))
 
+def has_adapter_files(path):
+    config_file = os.path.join(path, "adapter_config.json")
+    safe_file = os.path.join(path, "adapter_model.safetensors")
+    bin_file = os.path.join(path, "adapter_model.bin")
+
+    if os.path.exists(config_file) and os.path.exists(safe_file):
+        return True
+
+    if os.path.exists(config_file) and os.path.exists(bin_file):
+        return True
+
+    return False
+
 def find_adapter_path():
-    if os.path.exists(local_adapter_path):
-        return local_adapter_path
+    if has_adapter_files(local_adapter_folder):
+        return local_adapter_folder
+
+    if has_adapter_files("."):
+        return "."
 
     if online_adapter_path.strip() != "":
-        return online_adapter_path
+        return online_adapter_path.strip()
 
     return None
 
 @st.cache_resource
 def load_everything(adapter_path):
-    processor = AutoProcessor.from_pretrained(
-        base_model_name,
-        trust_remote_code=True
-    )
+    try:
+        processor = AutoProcessor.from_pretrained(
+            adapter_path,
+            trust_remote_code=True
+        )
+    except:
+        processor = AutoProcessor.from_pretrained(
+            base_model_name,
+            trust_remote_code=True
+        )
 
     if torch.cuda.is_available():
         four_bit = BitsAndBytesConfig(
@@ -119,7 +141,8 @@ def create_markdown(img):
 
     if adapter_path is None:
         raise ValueError(
-            "Adapter model not found. Add final_markdown_model folder or set ADAPTER_MODEL_NAME variable."
+            "Adapter model not found. Upload adapter_config.json and adapter_model.safetensors in root, "
+            "or put them inside final_markdown_model folder, or set ADAPTER_MODEL_NAME."
         )
 
     processor, model = load_everything(adapter_path)
@@ -170,6 +193,7 @@ adapter_path = find_adapter_path()
 
 with st.sidebar:
     st.header("Model Settings")
+
     st.write("Base model")
     st.code(base_model_name)
 
@@ -177,6 +201,7 @@ with st.sidebar:
     if adapter_path is None:
         st.error("Adapter missing")
     else:
+        st.success("Adapter found")
         st.code(adapter_path)
 
     st.write("Image size")
@@ -192,9 +217,21 @@ with st.sidebar:
 
 if adapter_path is None:
     st.error("Adapter model not found.")
-    st.write("Use one of these fixes:")
-    st.code("Option 1: Upload final_markdown_model folder in repo")
-    st.code("Option 2: Set ADAPTER_MODEL_NAME in Space variables")
+
+    st.write("Your app can load adapter in any one of these ways:")
+
+    st.code(
+        "Method 1: Put adapter_config.json and adapter_model.safetensors in root folder"
+    )
+
+    st.code(
+        "Method 2: Put adapter_config.json and adapter_model.safetensors inside final_markdown_model folder"
+    )
+
+    st.code(
+        "Method 3: Set ADAPTER_MODEL_NAME = username/adapter-repo in Space variables"
+    )
+
     st.stop()
 
 uploaded_file = st.file_uploader(
